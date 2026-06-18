@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    ".",
+    "core"
+]
+
+[package]
+name = "catremote"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+slint = "1.9.1"
+thiserror = "2.0.3"
+
+[build-dependencies]
+slint-build = "1.9.1"
