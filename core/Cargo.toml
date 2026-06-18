@@ -1,0 +1,13 @@
+[package]
+name = "catremote-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+thiserror = "2.0.3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.8"
+zbus = "4"
