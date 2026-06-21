@@ -15,9 +15,10 @@
 
 *Goal: Give your Rust daemon the ability to capture audio and inject user interactions back into Wayland securely.*
 
-* [ ] **Audio Capture:** Hook into **PipeWire** to create a virtual audio loopback sink. Capture system audio and encode it using a low-latency codec like Opus.
-* [ ] **Input Injection Core via `libei`:** Implement **`libei` (Emulated Input)** bindings in Rust. This allows your headless daemon to safely inject mouse movements, clicks, and keyboard presses into Wayland without needing root (`sudo`) access.
-* [ ] **Controller Mapping:** Set up a translation layer to parse generic game controller inputs (evdev/gamepad) so they can be injected cleanly on the host side.
+* [x] **Audio Capture:** Hook into **PipeWire** to create a virtual audio loopback sink. Capture system audio and encode it using a low-latency codec like Opus.
+* [x] **Input Injection Core via `libei`:** Implement **`libei` (Emulated Input)** bindings in Rust. This allows your headless daemon to safely inject mouse movements, clicks, and keyboard presses into Wayland without needing root (`sudo`) access.
+* [x] **Controller Mapping:** Set up a translation layer to parse generic game controller inputs (evdev/gamepad) so they can be injected cleanly on the host side.
+
 
 ---
 
