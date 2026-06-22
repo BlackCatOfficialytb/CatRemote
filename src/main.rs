@@ -1,12 +1,20 @@
 slint::include_modules!();
 
-use catremote::state::ConnectionState;
+mod state;
+mod protocol;
+mod connection_manager;
 
-fn main() -> Result<(), slint::PlatformError> {
+use state::ConnectionState;
+use connection_manager::ConnectionManager;
+
+#[tokio::main]
+async fn main() -> Result<(), slint::PlatformError> {
     let ui = MainWindow::new()?;
 
     // Initialize state
     ui.set_connection_state(ConnectionState::Disconnected.to_string().into());
+
+    let manager = ConnectionManager::new();
 
     let ui_handle = ui.as_weak();
     
@@ -15,6 +23,8 @@ fn main() -> Result<(), slint::PlatformError> {
             println!("Attempting to connect to IP: {}, Code: {}", ip, code);
             ui.set_connection_state(ConnectionState::Connecting.to_string().into());
             
+            manager.start_background_testing();
+
             // TODO: In a real app, this would spawn a background task and update
             // the state upon success. For now, we mock a successful connection.
             let ui_handle_clone = ui.as_weak();

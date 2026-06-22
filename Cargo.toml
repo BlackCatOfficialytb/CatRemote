@@ -12,6 +12,8 @@ edition = "2021"
 [dependencies]
 slint = "1.9.1"
 thiserror = "2.0.3"
+tokio = { version = "1.41.0", features = ["full"] }
+async-trait = "0.1.83"
 
 [build-dependencies]
 slint-build = "1.9.1"

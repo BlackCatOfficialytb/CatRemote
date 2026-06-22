@@ -8,7 +8,7 @@ pub enum ConnectionState {
 }
 
 impl fmt::Display for ConnectionState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Display {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConnectionState::Disconnected => write!(f, "Disconnected"),
             ConnectionState::Connecting => write!(f, "Connecting..."),
