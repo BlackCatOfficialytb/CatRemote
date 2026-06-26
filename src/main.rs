@@ -1,48 +1,106 @@
-slint::include_modules!();
+use clap::Parser;
+use catremote_core::portal;
+use catremote_core::capture::CaptureStream;
+use catremote_core::encoder::{Encoder, HardwareEncoder};
+use catremote_core::audio::AudioCaptureStream;
+use catremote_core::input::InputInjector;
+use catremote_core::controller::{ControllerMapper, GamepadState};
+use catremote_core::connection_manager::ConnectionManager;
+use std::path::PathBuf;
+use std::time::Duration;
 
-mod state;
-mod protocol;
-mod connection_manager;
+#[derive(Parser, Debug)]
+#[command(name = "catremote-core", version = "0.1.0", about = "CatRemote Capture and Encode Core CLI")]
+struct Args {
+    #[arg(short, long)]
+    record: Option<PathBuf>,
 
-use state::ConnectionState;
-use connection_manager::ConnectionManager;
+    #[arg(short, long, default_value = "h264")]
+    codec: String,
+
+    #[arg(short, long, default_value_t = 60)]
+    fps: u32,
+
+    #[arg(long, default_value_t = false)]
+    enable_audio: bool,
+
+    #[arg(long, default_value_t = false)]
+    inject_inputs: bool,
+
+    /// Continuously latency-test the available transmission protocols and select the best.
+    #[arg(long, default_value_t = false)]
+    test_protocols: bool,
+}
 
 #[tokio::main]
-async fn main() -> Result<(), slint::PlatformError> {
-    let ui = MainWindow::new()?;
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args = Args::parse();
+    println!("Starting CatRemote Core Daemon...");
 
-    // Initialize state
-    ui.set_connection_state(ConnectionState::Disconnected.to_string().into());
+    let node_id = portal::init_screencast_session().await?;
+    println!("Screencast portal node ID retrieved: {}", node_id);
 
-    let manager = ConnectionManager::new();
+    let mut encoder = HardwareEncoder::new(&args.codec, args.record.as_deref())?;
+    encoder.initialize(1920, 1080, args.fps)?;
 
-    let ui_handle = ui.as_weak();
-    
-    ui.on_connect_clicked(move |ip, code| {
-        if let Some(ui) = ui_handle.upgrade() {
-            println!("Attempting to connect to IP: {}, Code: {}", ip, code);
-            ui.set_connection_state(ConnectionState::Connecting.to_string().into());
-            
-            manager.start_background_testing();
+    let stream = CaptureStream::new(node_id)?;
+    stream.start()?;
 
-            // TODO: In a real app, this would spawn a background task and update
-            // the state upon success. For now, we mock a successful connection.
-            let ui_handle_clone = ui.as_weak();
-            slint::Timer::single_shot(std::time::Duration::from_secs(1), move || {
-                if let Some(ui) = ui_handle_clone.upgrade() {
-                    ui.set_connection_state(ConnectionState::Connected.to_string().into());
-                }
-            });
+    let audio_stream = if args.enable_audio {
+        let stream = AudioCaptureStream::new()?;
+        stream.start()?;
+        Some(stream)
+    } else {
+        None
+    };
+
+    let input_system = if args.inject_inputs {
+        let injector = InputInjector::new()?;
+        let mapper = ControllerMapper::new();
+        Some((injector, mapper))
+    } else {
+        None
+    };
+
+    if args.test_protocols {
+        let manager = ConnectionManager::new();
+        manager.start_background_testing();
+    }
+
+    println!("Core pipeline active. Press Ctrl+C to terminate.");
+
+    let mut frame_count = 0;
+    loop {
+        tokio::time::sleep(Duration::from_millis((1000 / args.fps) as u64)).await;
+
+        let dummy_frame = vec![0u8; 1920 * 1080 * 4];
+        let packets = encoder.encode_frame(&dummy_frame)?;
+
+        frame_count += 1;
+        if frame_count % args.fps == 0 {
+            println!("Encoded {} frames (last packet size: {} bytes)", frame_count, packets.len());
         }
-    });
 
-    let ui_handle = ui.as_weak();
-    ui.on_disconnect_clicked(move || {
-        if let Some(ui) = ui_handle.upgrade() {
-            println!("Disconnecting...");
-            ui.set_connection_state(ConnectionState::Disconnected.to_string().into());
+        if let Some(ref audio) = audio_stream {
+            let audio_frame = audio.capture_frame()?;
+            if frame_count % args.fps == 0 {
+                println!("Processed audio loopback frame (size: {} bytes)", audio_frame.len());
+            }
         }
-    });
 
-    ui.run()
+        if let Some((ref injector, ref mapper)) = input_system {
+            // Periodically simulate gamepad input events
+            if frame_count % (args.fps * 3) == 0 {
+                println!("--- Simulating Gamepad Input Injection Event (Frame {}) ---", frame_count);
+                let mock_gamepad = GamepadState {
+                    left_stick_x: 0.75,
+                    left_stick_y: -0.4,
+                    button_a: true,
+                    button_b: frame_count % (args.fps * 6) == 0,
+                    ..Default::default()
+                };
+                mapper.map_gamepad_to_input(&mock_gamepad, injector)?;
+            }
+        }
+    }
 }
