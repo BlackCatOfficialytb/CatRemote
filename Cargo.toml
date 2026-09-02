@@ -1,5 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "core"
+    "core",
+    "crates/catremote-env",
+    "crates/catremote-capture",
+    "crates/catremote-audio-input"
 ]

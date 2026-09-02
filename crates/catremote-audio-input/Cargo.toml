@@ -1,0 +1,25 @@
+[package]
+name = "catremote-audio-input"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+catremote-env = { path = "../catremote-env" }
+anyhow = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.38", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bytes = "1.5"
+parking_lot = "0.12"
+async-trait = "0.1"
+cpal = "0.15"
+ring = "0.17"
+rand = "0.8"
+opus = { version = "0.4", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = "0.1"
+nix = "0.28"
+libc = "0.2"
+evdev = "0.10"
