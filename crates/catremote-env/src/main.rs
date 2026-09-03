@@ -95,26 +95,26 @@ async fn run_check(format: OutputFormat, section: Option<String>) -> anyhow::Res
 async fn run_validate(strict: bool) -> anyhow::Result<bool> {
     let caps = detect_capabilities().await?;
 
-    let mut issues = Vec::new();
+    let mut issues = Vec::<String>::new();
 
     if !caps.compositor.wlr_screencopy_v1 && !caps.compositor.ext_image_capture_source_v1 {
-        issues.push("No supported screen capture protocol (wlr-screencopy-v1 or ext-image-capture-source-v1)");
+        issues.push("No supported screen capture protocol (wlr-screencopy-v1 or ext-image-capture-source-v1)".to_string());
     }
 
     if caps.portal.screencast_permission != catremote_env::PortalPermissionState::Granted {
-        issues.push("ScreenCast portal permission not granted");
+        issues.push("ScreenCast portal permission not granted".to_string());
     }
 
     if !caps.gpu_encoders.vaapi.available && !caps.gpu_encoders.nvenc.available {
-        issues.push("No GPU encoder available (VA-API or NVENC)");
+        issues.push("No GPU encoder available (VA-API or NVENC)".to_string());
     }
 
     if !caps.pipewire.available {
-        issues.push("PipeWire not available");
+        issues.push("PipeWire not available".to_string());
     } else if let Some(version) = &caps.pipewire.version {
         if let Some(ver) = parse_version(version) {
             if ver < (0, 3, 70) {
-                issues.push("PipeWire version < 0.3.70");
+                issues.push("PipeWire version < 0.3.70".to_string());
             }
         }
     }
@@ -124,15 +124,15 @@ async fn run_validate(strict: bool) -> anyhow::Result<bool> {
     }
 
     if !caps.kernel.dma_buf.available {
-        issues.push("DMA-BUF heaps not available");
+        issues.push("DMA-BUF heaps not available".to_string());
     }
 
     if !caps.kernel.libei.available {
-        issues.push("libei not available");
+        issues.push("libei not available".to_string());
     }
 
     if !caps.kernel.evdev.available {
-        issues.push("evdev not available");
+        issues.push("evdev not available".to_string());
     }
 
     if issues.is_empty() {

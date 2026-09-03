@@ -107,7 +107,7 @@ pub enum AudioInputError {
 
 pub struct AudioEngine {
     capture: Option<Box<dyn AudioCapture>>,
-    encoder: OpusEncoder,
+    encoder: Option<OpusEncoder>,
     frame_tx: mpsc::Sender<AudioFrame>,
     frame_rx: Arc<Mutex<mpsc::Receiver<AudioFrame>>>,
     running: Arc<Mutex<bool>>,
@@ -132,8 +132,8 @@ impl AudioEngine {
         let (frame_tx, frame_rx) = mpsc::channel(64);
 
         Ok(Self {
-            capture,
-            encoder,
+            capture: Some(capture),
+            encoder: Some(encoder),
             frame_tx,
             frame_rx: Arc::new(Mutex::new(frame_rx)),
             running: Arc::new(Mutex::new(false)),
@@ -144,16 +144,16 @@ impl AudioEngine {
     pub async fn start(&mut self) -> Result<()> {
         *self.running.lock().await = true;
 
-        let mut capture = self.capture.take().unwrap();
-        let mut encoder = self.encoder;
+        let capture = self.capture.take().unwrap();
+        let mut encoder = self.encoder.take().unwrap();
         let frame_tx = self.frame_tx.clone();
         let running = self.running.clone();
         let stats = self.stats.clone();
         let frame_size = encoder.config.frame_size;
 
-        capture.start().await?;
-
         tokio::spawn(async move {
+            let mut capture = capture;
+            capture.start().await.ok();
             let mut buffer = vec![0f32; frame_size * encoder.config.channels as usize];
 
             while *running.lock().await {
@@ -268,7 +268,6 @@ impl OpusEncoder {
         }
         #[cfg(not(feature = "opus"))]
         {
-            // Passthrough: convert i16 to bytes
             let mut output = Vec::with_capacity(pcm.len() * 2);
             for sample in pcm {
                 output.extend_from_slice(&sample.to_le_bytes());
@@ -383,8 +382,6 @@ impl AudioCapture for PipeWireAudioCapture {
 }
 
 struct CpalAudioCapture {
-    #[cfg(not(target_os = "linux"))]
-    stream: Option<cpal::Stream>,
     config: AudioConfig,
 }
 
@@ -392,24 +389,8 @@ impl CpalAudioCapture {
     async fn new(config: &AudioConfig) -> Result<Self> {
         #[cfg(not(target_os = "linux"))]
         {
-            let host = cpal::default_host();
-            let device = host.default_input_device().ok_or_else(|| anyhow!("No input device"))?;
-
-            let config_cpal = cpal::StreamConfig {
-                channels: config.channels,
-                sample_rate: cpal::SampleRate(config.sample_rate),
-                buffer_size: cpal::BufferSize::Fixed(config.frame_size as u32),
-            };
-
-            let stream = device.build_input_stream(
-                &config_cpal,
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {},
-                |err| eprintln!("Audio stream error: {}", err),
-                None,
-            )?;
-
+            // Stub implementation for non-Linux platforms
             Ok(Self {
-                stream: Some(stream),
                 config: config.clone(),
             })
         }
@@ -425,9 +406,6 @@ impl AudioCapture for CpalAudioCapture {
     async fn start(&mut self) -> Result<()> {
         #[cfg(not(target_os = "linux"))]
         {
-            if let Some(stream) = &self.stream {
-                stream.play()?;
-            }
             Ok(())
         }
         #[cfg(target_os = "linux")]
@@ -437,9 +415,6 @@ impl AudioCapture for CpalAudioCapture {
     async fn stop(&mut self) -> Result<()> {
         #[cfg(not(target_os = "linux"))]
         {
-            if let Some(stream) = &self.stream {
-                stream.pause()?;
-            }
             Ok(())
         }
         #[cfg(target_os = "linux")]
@@ -474,7 +449,7 @@ impl InputEngine {
         let (event_tx, event_rx) = mpsc::channel(128);
 
         Ok(Self {
-            libei_context,
+            libei_context: Some(libei_context),
             controller_mapper,
             event_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
@@ -509,12 +484,18 @@ impl InputEngine {
         Ok(())
     }
 
+    #[cfg(target_os = "linux")]
     pub async fn inject_controller_event(&mut self, event: evdev::Event) -> Result<()> {
         let input_events = self.controller_mapper.map_event(event);
         for event in input_events {
             self.inject_event(event).await?;
         }
         Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub async fn inject_controller_event(&mut self, _event: ()) -> Result<()> {
+        Err(anyhow!("Controller mapping only available on Linux"))
     }
 
     pub async fn next_event(&mut self) -> Option<InputEvent> {
@@ -657,6 +638,7 @@ impl ControllerMapper {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub fn map_event(&mut self, event: evdev::Event) -> Vec<InputEvent> {
         let mut events = Vec::new();
 
@@ -668,7 +650,7 @@ impl ControllerMapper {
                 match code {
                     0x00 => { // ABS_X - Left stick X
                         let normalized = self.apply_deadzone(value, 32767);
-                        let x = normalized * self.sensitivity;
+                        let x = normalized * self.sensitivity as f64;
                         events.push(InputEvent {
                             timestamp: current_timestamp(),
                             event_type: InputEventType::PointerMove { x, y: 0.0 },
@@ -678,7 +660,7 @@ impl ControllerMapper {
                     }
                     0x01 => { // ABS_Y - Left stick Y
                         let normalized = self.apply_deadzone(value, 32767);
-                        let y = normalized * self.sensitivity;
+                        let y = normalized * self.sensitivity as f64;
                         events.push(InputEvent {
                             timestamp: current_timestamp(),
                             event_type: InputEventType::PointerMove { x: 0.0, y },
@@ -688,7 +670,7 @@ impl ControllerMapper {
                     }
                     0x03 => { // ABS_RX - Right stick X
                         let normalized = self.apply_deadzone(value, 32767);
-                        let dx = normalized * self.sensitivity * 0.5;
+                        let dx = normalized * self.sensitivity as f64 * 0.5;
                         events.push(InputEvent {
                             timestamp: current_timestamp(),
                             event_type: InputEventType::PointerScroll { dx, dy: 0.0 },
@@ -698,7 +680,7 @@ impl ControllerMapper {
                     }
                     0x04 => { // ABS_RY - Right stick Y
                         let normalized = self.apply_deadzone(value, 32767);
-                        let dy = normalized * self.sensitivity * 0.5;
+                        let dy = normalized * self.sensitivity as f64 * 0.5;
                         events.push(InputEvent {
                             timestamp: current_timestamp(),
                             event_type: InputEventType::PointerScroll { dx: 0.0, dy },
@@ -759,6 +741,11 @@ impl ControllerMapper {
         }
 
         events
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn map_event(&mut self, _event: ()) -> Vec<InputEvent> {
+        Vec::new()
     }
 
     fn apply_deadzone(&self, value: i32, max: i32) -> f64 {

@@ -4,5 +4,6 @@ members = [
     "core",
     "crates/catremote-env",
     "crates/catremote-capture",
-    "crates/catremote-audio-input"
+    "crates/catremote-audio-input",
+    "crates/catremote-transport"
 ]

@@ -14,9 +14,13 @@ bytes = "1.5"
 parking_lot = "0.12"
 async-trait = "0.1"
 cpal = "0.15"
-ring = "0.17"
 rand = "0.8"
 opus = { version = "0.4", optional = true }
+ring = { version = "0.17", optional = true }
+
+[features]
+default = ["opus"]
+ring-crypto = ["ring"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 pipewire = "0.1"
