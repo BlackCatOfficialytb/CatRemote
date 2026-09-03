@@ -238,9 +238,8 @@ impl OpusEncoder {
             } else {
                 opus::Channels::Stereo
             };
-            let encoder = opus::Encoder::new(config.sample_rate, channels, opus::Application::Audio)?;
-            encoder.set_bitrate(opus::Bitrate::Bits(config.bitrate))?;
-            encoder.set_frame_size(config.frame_size)?;
+            let mut encoder = opus::Encoder::new(config.sample_rate, channels, opus::Application::Audio)?;
+            encoder.set_bitrate(opus::Bitrate::Bits(config.bitrate as i32))?;
 
             Ok(Self {
                 config: config.clone(),
@@ -288,137 +287,102 @@ async fn select_audio_capture(config: &AudioConfig) -> Result<Box<dyn AudioCaptu
     }
 }
 
+#[cfg(target_os = "linux")]
 struct PipeWireAudioCapture {
-    #[cfg(target_os = "linux")]
     stream: Option<pipewire::Stream>,
-    #[cfg(target_os = "linux")]
     buffer: Option<pipewire::Buffer>,
     config: AudioConfig,
 }
 
+#[cfg(target_os = "linux")]
 impl PipeWireAudioCapture {
     async fn new(config: &AudioConfig) -> Result<Self> {
-        #[cfg(target_os = "linux")]
-        {
-            let main_loop = pipewire::MainLoop::new()?;
-            let context = pipewire::Context::new(&main_loop)?;
+        let main_loop = pipewire::MainLoop::new()?;
+        let context = pipewire::Context::new(&main_loop)?;
 
-            let mut props = pipewire::Properties::new();
-            props.set(pipewire::keys::MEDIA_TYPE, "Audio");
-            props.set(pipewire::keys::MEDIA_CATEGORY, "Capture");
-            props.set(pipewire::keys::MEDIA_ROLE, "Music");
-            props.set(pipewire::keys::TARGET_OBJECT, "0");
+        let mut props = pipewire::Properties::new();
+        props.set(pipewire::keys::MEDIA_TYPE, "Audio");
+        props.set(pipewire::keys::MEDIA_CATEGORY, "Capture");
+        props.set(pipewire::keys::MEDIA_ROLE, "Music");
+        props.set(pipewire::keys::TARGET_OBJECT, "0");
 
-            let stream = pipewire::Stream::new(&context, "catremote-audio-capture", &props)?;
+        let stream = pipewire::Stream::new(&context, "catremote-audio-capture", &props)?;
 
-            Ok(Self {
-                stream: Some(stream),
-                buffer: None,
-                config: config.clone(),
-            })
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            Err(anyhow!("PipeWire only available on Linux"))
-        }
+        Ok(Self {
+            stream: Some(stream),
+            buffer: None,
+            config: config.clone(),
+        })
     }
 }
 
+#[cfg(target_os = "linux")]
 #[async_trait::async_trait]
 impl AudioCapture for PipeWireAudioCapture {
     async fn start(&mut self) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        {
-            if let Some(stream) = &mut self.stream {
-                stream.connect(
-                    pipewire::stream::Direction::Input,
-                    None,
-                    pipewire::stream::Flags::AUTOCONNECT | pipewire::stream::Flags::MAP_BUFFERS,
-                    &[],
-                )?;
-            }
-            Ok(())
+        if let Some(stream) = &mut self.stream {
+            stream.connect(
+                pipewire::stream::Direction::Input,
+                None,
+                pipewire::stream::Flags::AUTOCONNECT | pipewire::stream::Flags::MAP_BUFFERS,
+                &[],
+            )?;
         }
-        #[cfg(not(target_os = "linux"))]
-        Err(anyhow!("Not available"))
+        Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        {
-            if let Some(stream) = &mut self.stream {
-                stream.disconnect()?;
-            }
-            Ok(())
+        if let Some(stream) = &mut self.stream {
+            stream.disconnect()?;
         }
-        #[cfg(not(target_os = "linux"))]
-        Err(anyhow!("Not available"))
+        Ok(())
     }
 
     async fn read_frames(&mut self, buffer: &mut [f32]) -> Result<usize> {
-        #[cfg(target_os = "linux")]
-        {
-            if let Some(stream) = &mut self.stream {
-                if let Some(buffer_pw) = stream.dequeue_buffer()? {
-                    let datas = buffer_pw.datas();
-                    if let Some(data) = datas.first() {
-                        let samples = unsafe {
-                            std::slice::from_raw_parts(
-                                data.data() as *const f32,
-                                data.chunk().size() / 4,
-                            )
-                        };
-                        let len = samples.len().min(buffer.len());
-                        buffer[..len].copy_from_slice(&samples[..len]);
-                        return Ok(len / self.config.channels as usize);
-                    }
+        if let Some(stream) = &mut self.stream {
+            if let Some(buffer_pw) = stream.dequeue_buffer()? {
+                let datas = buffer_pw.datas();
+                if let Some(data) = datas.first() {
+                    let samples = unsafe {
+                        std::slice::from_raw_parts(
+                            data.data() as *const f32,
+                            data.chunk().size() / 4,
+                        )
+                    };
+                    let len = samples.len().min(buffer.len());
+                    buffer[..len].copy_from_slice(&samples[..len]);
+                    return Ok(len / self.config.channels as usize);
                 }
             }
-            Ok(0)
         }
-        #[cfg(not(target_os = "linux"))]
         Ok(0)
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 struct CpalAudioCapture {
     config: AudioConfig,
 }
 
+#[cfg(not(target_os = "linux"))]
 impl CpalAudioCapture {
     async fn new(config: &AudioConfig) -> Result<Self> {
-        #[cfg(not(target_os = "linux"))]
-        {
-            // Stub implementation for non-Linux platforms
-            Ok(Self {
-                config: config.clone(),
-            })
-        }
-        #[cfg(target_os = "linux")]
-        {
-            Err(anyhow!("CPAL fallback not used on Linux"))
-        }
+        // Stub implementation for non-Linux platforms
+        Ok(Self {
+            config: config.clone(),
+        })
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 #[async_trait::async_trait]
 impl AudioCapture for CpalAudioCapture {
     async fn start(&mut self) -> Result<()> {
-        #[cfg(not(target_os = "linux"))]
-        {
-            Ok(())
-        }
-        #[cfg(target_os = "linux")]
-        Err(anyhow!("Not available"))
+        Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {
-        #[cfg(not(target_os = "linux"))]
-        {
-            Ok(())
-        }
-        #[cfg(target_os = "linux")]
-        Err(anyhow!("Not available"))
+        Ok(())
     }
 
     async fn read_frames(&mut self, _buffer: &mut [f32]) -> Result<usize> {
@@ -428,6 +392,7 @@ impl AudioCapture for CpalAudioCapture {
 
 pub struct InputEngine {
     libei_context: Option<Box<dyn LibeiContext>>,
+    #[cfg(target_os = "linux")]
     controller_mapper: ControllerMapper,
     event_tx: mpsc::Sender<InputEvent>,
     event_rx: Arc<Mutex<mpsc::Receiver<InputEvent>>>,
@@ -444,12 +409,15 @@ pub struct InputStats {
 impl InputEngine {
     pub async fn new(config: InputConfig, _capabilities: &Capabilities) -> Result<Self> {
         let libei_context = select_libei_context().await?;
-        let controller_mapper = ControllerMapper::new(config.deadzone, config.sensitivity);
 
         let (event_tx, event_rx) = mpsc::channel(128);
 
+        #[cfg(target_os = "linux")]
+        let controller_mapper = ControllerMapper::new(config.deadzone, config.sensitivity);
+
         Ok(Self {
             libei_context: Some(libei_context),
+            #[cfg(target_os = "linux")]
             controller_mapper,
             event_tx,
             event_rx: Arc::new(Mutex::new(event_rx)),
@@ -510,105 +478,83 @@ trait LibeiContext: Send + Sync {
     async fn inject_event(&mut self, event: &InputEvent) -> Result<()>;
 }
 
+#[cfg(target_os = "linux")]
 struct LibeiContextImpl {
-    #[cfg(target_os = "linux")]
     context: Option<libei_stub::Context>,
-    #[cfg(target_os = "linux")]
     seat: Option<libei_stub::Seat>,
-    #[cfg(target_os = "linux")]
     device: Option<libei_stub::Device>,
 }
 
+#[cfg(target_os = "linux")]
 impl LibeiContextImpl {
     async fn new() -> Result<Self> {
-        #[cfg(target_os = "linux")]
-        {
-            Ok(Self {
-                context: None,
-                seat: None,
-                device: None,
-            })
-        }
-        #[cfg(not(target_os = "linux"))]
-        {
-            Err(anyhow!("libei only available on Linux"))
-        }
+        Ok(Self {
+            context: None,
+            seat: None,
+            device: None,
+        })
     }
 }
 
+#[cfg(target_os = "linux")]
 #[async_trait::async_trait]
 impl LibeiContext for LibeiContextImpl {
     async fn connect(&mut self) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        {
-            let context = libei_stub::Context::new("catremote")?;
-            context.connect()?;
+        let context = libei_stub::Context::new("catremote")?;
+        context.connect()?;
 
-            let seat = context.get_seat("default")?;
-            let device = seat.create_device("catremote-virtual", libei_stub::DeviceType::Pointer)?;
+        let seat = context.get_seat("default")?;
+        let device = seat.create_device("catremote-virtual", libei_stub::DeviceType::Pointer)?;
 
-            self.context = Some(context);
-            self.seat = Some(seat);
-            self.device = Some(device);
+        self.context = Some(context);
+        self.seat = Some(seat);
+        self.device = Some(device);
 
-            Ok(())
-        }
-        #[cfg(not(target_os = "linux"))]
-        Err(anyhow!("Not available"))
+        Ok(())
     }
 
     async fn disconnect(&mut self) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        {
-            self.device = None;
-            self.seat = None;
-            self.context = None;
-            Ok(())
-        }
-        #[cfg(not(target_os = "linux"))]
-        Err(anyhow!("Not available"))
+        self.device = None;
+        self.seat = None;
+        self.context = None;
+        Ok(())
     }
 
     async fn inject_event(&mut self, event: &InputEvent) -> Result<()> {
-        #[cfg(target_os = "linux")]
-        {
-            if let Some(device) = &mut self.device {
-                match &event.event_type {
-                    InputEventType::PointerMove { x, y } => {
-                        device.pointer_move(*x, *y)?;
-                    }
-                    InputEventType::PointerButton { button, pressed } => {
-                        let state = if *pressed { libei_stub::ButtonState::Pressed } else { libei_stub::ButtonState::Released };
-                        device.pointer_button(*button, state)?;
-                    }
-                    InputEventType::PointerScroll { dx, dy } => {
-                        device.pointer_scroll(*dx, *dy)?;
-                    }
-                    InputEventType::KeyboardKey { key, pressed } => {
-                        let state = if *pressed { libei_stub::KeyState::Pressed } else { libei_stub::KeyState::Released };
-                        device.keyboard_key(*key, state)?;
-                    }
-                    InputEventType::KeyboardModifiers { mods } => {
-                        device.keyboard_modifiers(*mods)?;
-                    }
-                    InputEventType::TouchDown { slot, x, y } => {
-                        device.touch_down(*slot, *x, *y)?;
-                    }
-                    InputEventType::TouchMove { slot, x, y } => {
-                        device.touch_move(*slot, *x, *y)?;
-                    }
-                    InputEventType::TouchUp { slot } => {
-                        device.touch_up(*slot)?;
-                    }
-                    InputEventType::TouchFrame => {
-                        device.touch_frame()?;
-                    }
+        if let Some(device) = &mut self.device {
+            match &event.event_type {
+                InputEventType::PointerMove { x, y } => {
+                    device.pointer_move(*x, *y)?;
+                }
+                InputEventType::PointerButton { button, pressed } => {
+                    let state = if *pressed { libei_stub::ButtonState::Pressed } else { libei_stub::ButtonState::Released };
+                    device.pointer_button(*button, state)?;
+                }
+                InputEventType::PointerScroll { dx, dy } => {
+                    device.pointer_scroll(*dx, *dy)?;
+                }
+                InputEventType::KeyboardKey { key, pressed } => {
+                    let state = if *pressed { libei_stub::KeyState::Pressed } else { libei_stub::KeyState::Released };
+                    device.keyboard_key(*key, state)?;
+                }
+                InputEventType::KeyboardModifiers { mods } => {
+                    device.keyboard_modifiers(*mods)?;
+                }
+                InputEventType::TouchDown { slot, x, y } => {
+                    device.touch_down(*slot, *x, *y)?;
+                }
+                InputEventType::TouchMove { slot, x, y } => {
+                    device.touch_move(*slot, *x, *y)?;
+                }
+                InputEventType::TouchUp { slot } => {
+                    device.touch_up(*slot)?;
+                }
+                InputEventType::TouchFrame => {
+                    device.touch_frame()?;
                 }
             }
-            Ok(())
         }
-        #[cfg(not(target_os = "linux"))]
-        Err(anyhow!("Not available"))
+        Ok(())
     }
 }
 
@@ -623,12 +569,14 @@ async fn select_libei_context() -> Result<Box<dyn LibeiContext>> {
     }
 }
 
+#[cfg(target_os = "linux")]
 pub struct ControllerMapper {
     deadzone: f32,
     sensitivity: f32,
     axis_state: std::collections::HashMap<(u16, u16), i32>,
 }
 
+#[cfg(target_os = "linux")]
 impl ControllerMapper {
     pub fn new(deadzone: f32, sensitivity: f32) -> Self {
         Self {
@@ -638,7 +586,6 @@ impl ControllerMapper {
         }
     }
 
-    #[cfg(target_os = "linux")]
     pub fn map_event(&mut self, event: evdev::Event) -> Vec<InputEvent> {
         let mut events = Vec::new();
 
@@ -741,11 +688,6 @@ impl ControllerMapper {
         }
 
         events
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn map_event(&mut self, _event: ()) -> Vec<InputEvent> {
-        Vec::new()
     }
 
     fn apply_deadzone(&self, value: i32, max: i32) -> f64 {
